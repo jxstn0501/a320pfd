@@ -89,8 +89,14 @@ export default () => Rx.Observable.interval(interval)
             if (j.buttonReleased(11)) {
                 data.ap.targetSpeed -= 10;
             }
-            return data;
+            return {
+                ...data,
+                interval: timeInterval.interval
+            };
         } else {
-            return;
+            return {
+                ...data,
+                interval: timeInterval.interval
+            };
         }
     })

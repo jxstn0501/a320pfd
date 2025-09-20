@@ -75,6 +75,7 @@ Rx.Observable
                 // Do something for "enter" or "return" key press.
                 break;
             case "Escape":
+                break;
         }
         return data;
     }).subscribe();
@@ -85,5 +86,8 @@ export default () => Rx.Observable.interval(interval)
         _.map(_.values(assignments), ({ p, inc }) =>
             _.set(data, p, _.get(data, p) + 0.01 * inc * _.get(derivatives, p))
         )
-        return data;
+        return {
+            ...data,
+            interval: timeInterval.interval
+        };
     })
