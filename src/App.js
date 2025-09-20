@@ -2,7 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
 import Pfd from './Pfd';
-import Rx from 'rxjs/Rx';
+import * as Rx from 'rxjs';
+import { Observable } from 'rxjs/Observable';
 import _ from 'lodash';
 import gamepadObs from './inputs/Gamepad';
 import keyboardObs from './inputs/Keyboard';
@@ -10,7 +11,6 @@ import gyroscopeObs from './inputs/Gyroscope';
 import registerServiceWorker from './registerServiceWorker';
 import InputSelector from './InputSelector';
 import './App.css';
-import { Observable } from 'rxjs/Observable';
 
 let airspeed = 160;
 let overspeed = 170;

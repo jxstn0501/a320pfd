@@ -1,6 +1,6 @@
-import Rx from 'rxjs/Rx';
+import * as Rx from 'rxjs';
+import 'rxjs/add/operator/timeInterval';
 import _ from 'lodash';
-import { timeInterval } from 'rxjs/operator/timeInterval';
 
 let absolute;
 let z; //z axis / lacet / yaw / alpha

@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
 import Pfd from './Pfd';
-import Rx from 'rxjs/Rx';
+import * as Rx from 'rxjs';
 import _ from 'lodash';
 import registerServiceWorker from './registerServiceWorker';
 import InputSelector from './InputSelector';
