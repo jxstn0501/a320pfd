@@ -353,6 +353,27 @@ function Get-YearFromName {
     return $null
 }
 
+function Title-ContainsYearToken {
+    <#
+        .SYNOPSIS
+        Prüft, ob ein Titel bereits eine Jahresangabe enthält.
+
+        .DESCRIPTION
+        Erkennt Jahreszahlen in Klammern ("(2022)") oder nach Unterstrich
+        ("_2022" bzw. "_1999"), um doppelte Ergänzungen zu vermeiden.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $false
+    }
+
+    return [Regex]::IsMatch($Name, '(?i)(\(\d{4}\)|_(19|20)\d{2}|\b(19|20)\d{2}\b)')
+}
+
 function Get-SeriesInfoFromName {
     <#
         .SYNOPSIS
@@ -399,6 +420,74 @@ function Derive-TitleFromFileSystemInfo {
 
     $name = if ($Item.PSIsContainer) { $Item.Name } else { [System.IO.Path]::GetFileNameWithoutExtension($Item.Name) }
     return Clean-TitleString -InputString $name
+}
+
+function Resolve-SeriesRoot {
+    <#
+        .SYNOPSIS
+        Ermittelt den Zielordner einer Serie unter Berücksichtigung bestehender Strukturen.
+
+        .DESCRIPTION
+        Verhindert die Anlage doppelter Serien-Ordner, indem zunächst nach vorhandenen
+        Ordnern mit identischem Namen (inklusive Jahreszusatz) gesucht wird. Wird kein
+        passender Ordner gefunden, wird der gewünschte Zielordner vorgeschlagen.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$SeriesBaseName,
+
+        [Nullable[int]]$Year
+    )
+
+    $showsPath = $Script:Config.ShowsPath
+    $existingDir = $null
+    $resolvedYear = $Year
+
+    if (Test-Path -LiteralPath $showsPath) {
+        $directories = Get-ChildItem -LiteralPath $showsPath -Directory -ErrorAction SilentlyContinue
+        $candidateNames = @()
+
+        if ($Year) {
+            $candidateNames += "{0} ({1})" -f $SeriesBaseName, $Year
+        }
+
+        $candidateNames += $SeriesBaseName
+
+        foreach ($candidate in $candidateNames) {
+            $existingDir = $directories | Where-Object { $_.Name -ieq $candidate } | Select-Object -First 1
+            if ($existingDir) {
+                break
+            }
+        }
+
+        if (-not $existingDir) {
+            $escaped = [Regex]::Escape($SeriesBaseName)
+            $existingDir = $directories | Where-Object { $_.Name -match "^(?i)$escaped\s*\((19|20)\d{2}\)$" } | Select-Object -First 1
+            if ($existingDir) {
+                $yearMatch = [Regex]::Match($existingDir.Name, '(19|20)\d{2}')
+                if ($yearMatch.Success) {
+                    $resolvedYear = [int]$yearMatch.Value
+                }
+            }
+        }
+    }
+
+    if ($existingDir) {
+        return [pscustomobject]@{
+            Name   = $existingDir.Name
+            Path   = $existingDir.FullName
+            Exists = $true
+            Year   = $resolvedYear
+        }
+    }
+
+    $folderName = if ($Year) { "{0} ({1})" -f $SeriesBaseName, $Year } else { $SeriesBaseName }
+    return [pscustomobject]@{
+        Name   = $folderName
+        Path   = Join-Path -Path $showsPath -ChildPath $folderName
+        Exists = $false
+        Year   = $Year
+    }
 }
 
 #endregion Namensanalyse -----------------------------------------------------------------
@@ -596,11 +685,13 @@ function Determine-MediaLocally {
     }
 
     if ($seriesInfo) {
+        $seriesYear = Get-YearFromName -Name $title
         return [pscustomobject]@{
             Type        = 'Series'
             Title       = $seriesInfo.Name
             Season      = $seriesInfo.Season
             Episode     = $seriesInfo.Episode
+            Year        = $seriesYear
             Description = 'Lokale Serienerkennung'
         }
     }
@@ -635,14 +726,42 @@ function Handle-SeriesItem {
         [bool]$AutoYes = $false
     )
 
-    $seriesName = Sanitize-PathSegment -Name $Metadata.Title
+    $seriesTitle = Clean-TitleString -InputString $Metadata.Title
+    $seriesName = Sanitize-PathSegment -Name $seriesTitle
     $season = if ($Metadata.Season) { $Metadata.Season } else { 1 }
     $seasonFolder = "Season {0:D2}" -f $season
-    $seriesRoot = Join-Path -Path $Script:Config.ShowsPath -ChildPath $seriesName
+    $seriesInfo = Resolve-SeriesRoot -SeriesBaseName $seriesName -Year $Metadata.Year
+
+    if ($seriesInfo.Year -and $Metadata.PSObject.Properties['Year']) {
+        $Metadata.Year = $seriesInfo.Year
+    }
+    elseif ($seriesInfo.Year -and -not $Metadata.PSObject.Properties['Year']) {
+        $Metadata | Add-Member -NotePropertyName 'Year' -NotePropertyValue $seriesInfo.Year -Force
+    }
+
+    $seriesRoot = $seriesInfo.Path
+    Ensure-Directory -Path $Script:Config.ShowsPath | Out-Null
+
+    if ($seriesInfo.Exists) {
+        Write-Log -Message "Bestehende Serie erkannt: $($seriesInfo.Name)" -Level 'INFO'
+    }
+    else {
+        Write-Log -Message "Neue Serie wird angelegt: $($seriesInfo.Name)" -Level 'INFO'
+    }
+
+    Ensure-Directory -Path $seriesRoot | Out-Null
     $targetSeasonPath = Join-Path -Path $seriesRoot -ChildPath $seasonFolder
+
+    if (Test-Path -LiteralPath $targetSeasonPath) {
+        Write-Log -Message "Bestehende Staffel erkannt: $($seriesInfo.Name) -> $seasonFolder" -Level 'INFO'
+    }
+    else {
+        Write-Log -Message "Neue Staffel wird angelegt: $($seriesInfo.Name) -> $seasonFolder" -Level 'INFO'
+    }
+
     Ensure-Directory -Path $targetSeasonPath | Out-Null
 
-    Write-Log -Message "Serie erkannt: $seriesName (Season $season) :: $($Metadata.Description)" -Level 'INFO'
+    Write-Log -Message "Serie erkannt: $($seriesInfo.Name) (Season $season) :: $($Metadata.Description)" -Level 'INFO'
 
     $itemsToMove = @()
 
@@ -700,13 +819,27 @@ function Handle-MovieItem {
         [bool]$AutoYes = $false
     )
 
-    $title = Sanitize-PathSegment -Name (Clean-TitleString -InputString $Metadata.Title)
-    $folderName = if ($Metadata.Year) { "$title ($($Metadata.Year))" } else { $title }
+    $cleanTitle = Clean-TitleString -InputString $Metadata.Title
+    $title = Sanitize-PathSegment -Name $cleanTitle
+    $hasYearToken = Title-ContainsYearToken -Name $title
+    $folderName = if ($Metadata.Year -and -not $hasYearToken) { "$title ($($Metadata.Year))" } else { $title }
     $destinationPath = Join-Path -Path $Script:Config.MoviesPath -ChildPath $folderName
 
     Write-Log -Message "Film erkannt: $folderName :: $($Metadata.Description)" -Level 'INFO'
 
     if ($Item.PSIsContainer) {
+        if (Test-Path -LiteralPath $destinationPath) {
+            $message = if ($DryRun) {
+                "[DryRun] Filmordner bereits vorhanden – würde übersprungen: $destinationPath"
+            }
+            else {
+                "Filmordner übersprungen (bereits vorhanden): $destinationPath"
+            }
+
+            Write-Log -Message $message -Level 'INFO'
+            return
+        }
+
         Move-DirectorySafe -Source $Item -DestinationPath $destinationPath -DryRun:$DryRun -AutoYes:$AutoYes
     }
     else {
