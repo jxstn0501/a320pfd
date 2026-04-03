@@ -1,21 +1,13 @@
-body {
+html,
+body,
+#root {
   margin: 0;
   padding: 0;
-  font-family: "A320PFD";
-  background-color: black;
-  color: white;
-  height: 100%;
+  min-height: 100%;
 }
 
-#root{
-  height: 100%;
-}
-
-@font-face{
-  font-family: "A320PFD";
-  src: url("./a320pfd.woff") format("woff");
-}
-
-.svg {
-  font-family: "A320PFD";
+body {
+  font-family: Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
